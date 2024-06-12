@@ -1,3 +1,20 @@
+provider "aws" {
+  region = "us-west-2"
+}
+
+provider "random" {
+  version = "~> 3.0"
+}
+
+# Generate a unique identifier
+resource "random_id" "eks_cluster" {
+  byte_length = 4
+}
+
+resource "random_id" "eks_node_group" {
+  byte_length = 4
+}
+
 data "aws_iam_policy_document" "assume_role" {
   statement {
     effect = "Allow"
@@ -12,7 +29,7 @@ data "aws_iam_policy_document" "assume_role" {
 }
 
 resource "aws_iam_role" "example" {
-  name               = "eks-cluster-cloud-${timestamp()}"
+  name               = "eks-cluster-cloud-${random_id.eks_cluster.hex}"
   assume_role_policy = data.aws_iam_policy_document.assume_role.json
 }
 
@@ -25,6 +42,7 @@ resource "aws_iam_role_policy_attachment" "example-AmazonEKSClusterPolicy" {
 data "aws_vpc" "default" {
   default = true
 }
+
 #get public subnets for cluster
 data "aws_subnets" "public" {
   filter {
@@ -32,9 +50,10 @@ data "aws_subnets" "public" {
     values = [data.aws_vpc.default.id]
   }
 }
+
 #cluster provision
 resource "aws_eks_cluster" "example" {
-  name     = "EKS_CLOUD-${timestamp()}"
+  name     = "EKS_CLOUD-${random_id.eks_cluster.hex}"
   role_arn = aws_iam_role.example.arn
 
   vpc_config {
@@ -49,7 +68,7 @@ resource "aws_eks_cluster" "example" {
 }
 
 resource "aws_iam_role" "example1" {
-  name = "eks-node-group-cloud-${timestamp()}"
+  name = "eks-node-group-cloud-${random_id.eks_node_group.hex}"
 
   assume_role_policy = jsonencode({
     Statement = [{
@@ -81,7 +100,7 @@ resource "aws_iam_role_policy_attachment" "example-AmazonEC2ContainerRegistryRea
 #create node group
 resource "aws_eks_node_group" "example" {
   cluster_name    = aws_eks_cluster.example.name
-  node_group_name = "Node-cloud-${timestamp()}"
+  node_group_name = "Node-cloud-${random_id.eks_node_group.hex}"
   node_role_arn   = aws_iam_role.example1.arn
   subnet_ids      = data.aws_subnets.public.ids
 
