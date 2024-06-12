@@ -1,11 +1,3 @@
-provider "aws" {
-  region = "us-west-2"
-}
-
-provider "random" {
-  version = "~> 3.0"
-}
-
 # Generate a unique identifier
 resource "random_id" "eks_cluster" {
   byte_length = 4
