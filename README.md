@@ -44,19 +44,19 @@ sudo systemctl start jenkins
 ```
 ### Install Docker:
 ```
-    sudo apt-get update
+sudo apt-get update
 sudo apt-get install docker.io -y
 sudo usermod -aG docker $USER
 newgrp docker
 sudo chmod 777 /var/run/docker.sock
 ```
-    - Run SonarQube:
+### Run SonarQube:
     
-    `docker run -d --name sonar -p 9000:9000 sonarqube:lts-community`
+`docker run -d --name sonar -p 9000:9000 sonarqube:lts-community`
     
-    - Install Trivy, Terraform, and kubectl:
+### Install Trivy, Terraform, and kubectl:
 ```
-	sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+sudo apt-get install wget apt-transport-https gnupg lsb-release -y
 wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
 echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb/debian buster main" | sudo tee /etc/apt/sources.list.d/trivy.list > /dev/null
 sudo apt-get update
@@ -109,7 +109,7 @@ sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
     stages {
         stage('Checkout from Git') {
             steps {
-                git branch: 'main', url: 'https://github.com/your-repo/reddit-clone-k8s.git'
+                git branch: 'main', url: 'https://github.com/CYBERCODERoss/REDDIT-CLONE.git'
             }
         }
         stage('Terraform Init') {
@@ -134,62 +134,108 @@ sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
     
     - Add the following stage to deploy the Reddit clone:
 ```
-		pipeline {
+pipeline{
     agent any
-    tools {
+    tools{
         jdk 'jdk17'
         nodejs 'node16'
     }
+
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
+        SCANNER_HOME=tool 'sonar-scanner'
     }
+
     stages {
-        stage('Checkout from Git') {
-            steps {
-                git branch: 'main', url: 'https://github.com/your-repo/reddit-clone-k8s.git'
+        stage('clean workspace'){
+            steps{
+                cleanWs()
             }
         }
+
+        stage('Checkout from Git'){
+            steps{
+                git branch: 'main', url: 'https://github.com/CYBERCODERoss/REDDIT-CLONE.git'
+            }
+        }
+
         stage('Install Dependencies') {
             steps {
-                sh 'npm install'
+                sh "npm install"
             }
         }
-        stage('SonarQube Analysis') {
-            steps {
+
+        stage("Sonarqube Analysis "){
+            steps{
                 withSonarQubeEnv('sonar-server') {
-                    sh "$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Reddit -Dsonar.projectKey=Reddit"
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Reddit \
+                    -Dsonar.projectKey=Reddit '''
                 }
             }
         }
-        stage('OWASP FS Scan') {
-            steps {
-                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --format XML --out .', odcInstallation: 'DependencyCheck'
+
+        stage("quality gate"){
+           steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                }
             }
         }
-        stage('Trivy FS Scan') {
-            steps {
-                sh 'trivy fs . > trivyfs.txt'
-            }
-        }
-        stage('Docker Build & Push') {
+
+        stage('OWASP FS SCAN') {
             steps {
                 script {
-                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
-                        sh 'docker build -t reddit .'
-                        sh 'docker tag reddit your-dockerhub-user/reddit:latest'
-                        sh 'docker push your-dockerhub-user/reddit:latest'
+                    // Define the NVD API key directly or as a credential in Jenkins
+                    def nvdApiKey = '<add nvdAPIKey>'
+
+                    // Set the NVD API key as an environment variable
+                    withEnv(["NVD=${nvdApiKey}"]) {
+                        // Run OWASP Dependency-Check scan with the API key
+                        def scanResult = dependencyCheck additionalArguments: "--scan ./ --disableYarnAudit --disableNodeAudit --nvdApiKey $NVD", odcInstallation: 'DP-Check'
+                        echo "Dependency-Check scan completed successfully."
+                        echo "Result: $scanResult"
                     }
                 }
             }
         }
-        stage('Deploy to Kubernetes') {
+
+        stage('TRIVY FS SCAN') {
             steps {
-                script {
-                    withKubeConfig([credentialsId: 'kubeconfig', serverUrl: '']) {
-                        sh 'kubectl apply -f deployment.yml'
-                        sh 'kubectl apply -f service.yml'
-                        sh 'kubectl apply -f ingress.yml'
+                sh "trivy fs . > trivyfs.txt"
+            }
+        }
+
+        stage("Docker Build & Push"){
+            steps{
+                script{
+                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){
+                       sh "docker build -t reddit ."
+                       sh "docker tag reddit nautilushell/reddit:latest "
+                       sh "docker push nautilushell/reddit:latest "
                     }
+                }
+            }
+        }
+
+        stage("TRIVY"){
+            steps{
+                sh "trivy image --scanners vuln nautilushell/reddit:latest > trivy.txt"
+            }
+        }
+
+        stage('Deploy to container'){
+            steps{
+                sh 'docker run -d --name reddit -p 3000:3000 nautilushell/reddit:latest'
+            }
+        }
+
+        stage('Deploy to kubernets'){
+            steps{
+                script{
+                    withKubeConfig(caCertificate: '', clusterName: '', contextName: '', credentialsId: 'k8s', namespace: '', restrictKubeConfigAccess: false, serverUrl: '') {
+                       sh 'kubectl apply -f deployment.yml'
+                       sh 'kubectl apply -f service.yml'
+                       sh 'kubectl apply -f ingress.yml'
+                  }
                 }
             }
         }
@@ -207,11 +253,7 @@ sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 1. **Run Trivy Scan**:
     
     - SSH into the Jenkins instance and run:
-    
-    bash
-    
-    Copy code
-    
+   
     `trivy k8s --report summary cluster`
     
 
